@@ -1,0 +1,7 @@
+torch>=2.6
+torchvision>=0.21
+Pillow>=10.0
+
+opencv-contrib-python>=4.10
+mediapipe>=1.2,<2
+pyobjc-framework-Cocoa>=11,<13; sys_platform == "darwin"

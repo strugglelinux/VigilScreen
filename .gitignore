@@ -1,0 +1,47 @@
+# 本地环境与缓存
+__pycache__/
+*.py[cod]
+.cache/
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+
+# 训练材料、身份特征、截图及所有训练输出
+/data/
+/checkpoints/
+/screenshots/
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.npy
+*.onnx
+*.task
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.bmp
+*.gif
+*.tif
+*.tiff
+*.mp4
+*.mov
+*.avi
+
+# 构建产物、日志及本机诊断记录
+/build/
+/dist/
+*.app/
+*.dmg
+*.zip
+*.log
+/*_verification.json
+/*_gui.json
+/*_runtime.json
+/data_reset.json
