@@ -14,7 +14,7 @@ from uuid import uuid4
 import numpy as np
 from PIL import Image, ImageDraw, ImageTk
 
-from gaze import GazeEstimator, GazeResult
+from gaze import GazeEstimator, GazeResult,head_pose
 from test import positive_int,positive_float,nonnegative_int
 from runtime_paths import RESOURCE_ROOT, data_root
 
@@ -78,15 +78,8 @@ def validate_target(classes, target):
 
 
 def is_front_facing(landmarks):
-    """用双眼和鼻尖的相对位置近似判断正脸，不判断眼球视线。"""
-    right_eye, left_eye, nose = landmarks[:3]
-    distance = math.dist(right_eye, left_eye)
-    if distance < 1:
-        return False
-    middle_x = (right_eye[0] + left_eye[0]) / 2
-    return (abs(right_eye[1] - left_eye[1]) / distance <= 0.3
-            and abs(nose[0] - middle_x) / distance <= 0.25
-            and nose[1] > min(right_eye[1], left_eye[1]))
+    """头部几何只是前置条件，命中仍必须通过当前帧的双眼视线检查。"""
+    return head_pose(landmarks) is not None
 
 
 class FaceFinder:
@@ -267,6 +260,8 @@ class ChiCamera:
         self.stop_event = threading.Event()
         self.calibration_request = threading.Event()
         self.calibration_kind = 'camera'
+        self.calibration_generation = 0
+        self._screen_calibrated = False
         self.refresh_request = threading.Event()
         self.refreshing = True
         self.frames = queue.Queue(maxsize=1)
@@ -346,7 +341,8 @@ class ChiCamera:
         self.gaze_status = tk.StringVar(value='镜头采用默认参考。看屏幕请先校准屏幕视线。')
         ttk.Label(gaze_box,textvariable=self.gaze_status,wraplength=264).pack(fill='x',pady=(0,8))
         ttk.Button(gaze_box,text='校准镜头视线 · 5 帧',command=self.request_calibration).pack(fill='x',pady=3)
-        ttk.Button(gaze_box,text='校准屏幕视线 · 5 帧',command=lambda:self.request_calibration('screen')).pack(fill='x',pady=3)
+        ttk.Button(gaze_box,text='校准屏幕中心 · 5 帧',command=lambda:self.request_calibration('screen')).pack(fill='x',pady=3)
+        ttk.Button(gaze_box,text='扩展屏幕边角 · 5 帧',command=lambda:self.request_calibration('screen_extend')).pack(fill='x',pady=3)
         saved_box = ttk.LabelFrame(sidebar,text='最近截图',padding=12)
         saved_box.grid(row=2,column=0,sticky='ew',pady=(0,12))
         self.last_saved = tk.StringVar(value=f'截图目录：{args.output_dir}')
@@ -414,6 +410,9 @@ class ChiCamera:
         return 'break'
 
     def request_calibration(self, kind='camera'):
+        if kind=='screen_extend' and not getattr(self,'_screen_calibrated',False):
+            self.gaze_status.set('请先校准屏幕中心，再保持头部稳定，逐个校准常看的屏幕边角。')
+            return
         if self.args.target is not None and self.args.target in getattr(self,'_excluded',frozenset()):
             self.gaze_status.set('当前目标已被过滤，请取消过滤后再校准视线。')
             return
@@ -426,8 +425,10 @@ class ChiCamera:
         if self.refreshing or self.calibration_request.is_set():
             return
         self.calibration_kind = kind
-        location = '屏幕' if kind == 'screen' else '摄像头镜头'
-        self.gaze_status.set(f'请让单个 {self.args.target or '待校准人'} 睁眼注视{location}，正在收集 5 帧；校准期间不触发命中。')
+        self.calibration_generation = getattr(self,'calibration_generation',0)+1
+        self.calibration_started_at=time.monotonic()
+        location = '屏幕边角（一次一个位置）' if kind=='screen_extend' else '屏幕中心' if kind=='screen' else '摄像头镜头'
+        self.gaze_status.set(f'请让单个 {self.args.target or '待校准人'} 保持头部稳定、睁眼注视{location}；稍候采集 5 帧，期间不触发命中。')
         self.calibration_request.set()
 
     def reload_targets(self):
@@ -517,6 +518,7 @@ class ChiCamera:
                 self._excluded = new_excluded
                 self._scope = (revision,target)
         self.calibration_request.clear()
+        self._screen_calibrated = False
         self.events = queue.Queue()
         self.frames = queue.Queue(maxsize=1)
         self._switch_preview_sequence = None
@@ -594,6 +596,7 @@ class ChiCamera:
         self.cancel_target_switch()
         self.refresh_request.clear()
         self.calibration_request.clear()
+        self._screen_calibrated = False
         self.events = queue.Queue()
         self.refreshing = True
         self.status.set('正在加载人脸与视线模型…')
@@ -614,6 +617,7 @@ class ChiCamera:
         self.cancel_target_switch()
         self.refresh_request.clear()
         self.calibration_request.clear()
+        self._screen_calibrated = False
         self.events = queue.Queue()
         if self.active_camera is not None:
             self.active_camera.stop()
@@ -646,6 +650,7 @@ class ChiCamera:
         self.refreshing = True
         self.refresh_request.set()
         self.calibration_request.clear()
+        self._screen_calibrated = False
         self.events = queue.Queue()
         self.target_choice.configure(state='disabled')
         self.gaze_status.set('重新加载后请重新校准视线。')
@@ -678,6 +683,7 @@ class ChiCamera:
         excluded = getattr(self,'_excluded',frozenset())
         capture = gaze = None
         calibration,deadline = [],None
+        calibration_generation=None
         try:
             detector = FaceFinder(self.args.face_model)
             verifier = None
@@ -775,16 +781,31 @@ class ChiCamera:
                 finished = time.monotonic()
                 events.put(('performance',f'推理 {1000*(finished-started):.0f} ms · 采集后延迟 {1000*(finished-captured_at):.0f} ms'))
                 if self.calibration_request.is_set():
-                    deadline = deadline or time.monotonic()+8
+                    generation=getattr(self,'calibration_generation',0)
+                    if generation!=calibration_generation or deadline is None:
+                        requested_at=getattr(self,'calibration_started_at',0)
+                        calibration,deadline=[],(requested_at or time.monotonic())+8
+                        calibration_generation=generation
+                        calibration_kind=self.calibration_kind
                     valid = [row[9] for row in rows if (target is None or row[4]==target) and row[8] and row[9].ratios is not None]
-                    if len(valid)==1:
+                    if len(valid)==1 and captured_at>=getattr(self,'calibration_started_at',0)+.6:
                         calibration.append(valid[0])
+                    else:
+                        # 中断、闭眼或出现多个候选后，不能拼接前后不同人的采样。
+                        calibration.clear()
                     if len(calibration)>=5:
-                        gaze.calibrate(calibration,kind=self.calibration_kind)
-                        events.put(('gaze','校准完成，请移开视线后重新注视验证。'))
-                        self.calibration_request.clear()
-                    elif time.monotonic()>=deadline:
-                        events.put(('gaze','校准失败：画面请仅保留一张清晰待校准人脸，睁眼注视对应位置。'))
+                        try:
+                            gaze.calibrate(calibration[-5:],kind=calibration_kind)
+                        except ValueError as error:
+                            calibration=calibration[-4:]
+                            events.put(('gaze',f'校准采样尚不稳定：{error} 正在重新采样…'))
+                        else:
+                            events.put(('gaze_calibrated',calibration_kind))
+                            events.put(('gaze','校准完成，请移开视线后重新注视验证。' +
+                                        (' 可再次点击扩展，采集其他屏幕边角。' if calibration_kind!='camera' else '')))
+                            self.calibration_request.clear()
+                    if self.calibration_request.is_set() and time.monotonic()>=deadline:
+                        events.put(('gaze','校准失败：请仅保留一张清晰目标脸，保持头部稳定、双眼睁开并注视同一位置。'))
                         self.calibration_request.clear()
                     rows = [row[:6]+(False,)+row[7:] for row in rows]
                     tracker.update(rows,time.monotonic())
@@ -938,6 +959,9 @@ class ChiCamera:
                 if kind == 'hit':
                     if not self.refreshing:
                         self.show_hit(*value)
+                elif kind == 'gaze_calibrated':
+                    if value in {'screen','screen_extend'}:
+                        self._screen_calibrated=True
                 elif kind == 'gaze':
                     self.gaze_status.set(value)
                 elif kind == 'performance':

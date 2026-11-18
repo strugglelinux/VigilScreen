@@ -29,6 +29,59 @@ def row(x,looking):
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_unstable_calibration_resamples_without_stopping_monitor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app=self.make_worker(directory)
+            app.calibration_kind='screen';app.calibration_request.set()
+            picture=Image.new('RGB',(80,60))
+            capture=Mock(read=Mock(side_effect=[(picture,time.monotonic(),i) for i in range(1,8)]+[None]))
+            measurement=GazeResult(False,'待校准',((.65,.5),(.65,.5)))
+            gaze=Mock(measure=Mock(return_value=measurement))
+            gaze.calibrate.side_effect=[ValueError('头部移动过大'),None]
+            with patch('latest_camera.LatestCamera',return_value=capture),\
+                 patch('chi_camera.FaceFinder') as finder,patch('chi_camera.GazeEstimator',return_value=gaze):
+                finder.return_value.detect.return_value=[face()]
+                app.run_session()
+            self.assertEqual(gaze.calibrate.call_count,2)
+            self.assertFalse(app.calibration_request.is_set())
+            events=list(app.events.queue)
+            self.assertIn(('gaze_calibrated','screen'),events)
+            self.assertFalse([value for kind,value in events if kind in {'error','hit'}])
+
+    def test_unclear_frame_clears_partial_calibration_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app=self.make_worker(directory)
+            app.calibration_kind='camera';app.calibration_request.set()
+            picture=Image.new('RGB',(80,60))
+            capture=Mock(read=Mock(side_effect=[(picture,time.monotonic(),i) for i in range(1,9)]+[None]))
+            valid=GazeResult(False,'待校准',((.6,.5),(.6,.5)))
+            gaze=Mock(measure=Mock(side_effect=[valid]*3+[GazeResult(False,'闭眼')]+[valid]*4))
+            with patch('latest_camera.LatestCamera',return_value=capture),\
+                 patch('chi_camera.FaceFinder') as finder,patch('chi_camera.GazeEstimator',return_value=gaze):
+                finder.return_value.detect.return_value=[face()]
+                app.run_session()
+            gaze.calibrate.assert_not_called()
+            self.assertFalse([value for kind,value in app.events.queue if kind in {'error','hit'}])
+
+    def test_calibration_ignores_frames_captured_before_gaze_settling_delay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app=self.make_worker(directory)
+            app.calibration_kind='camera';app.calibration_request.set()
+            app.calibration_started_at=time.monotonic()
+            picture=Image.new('RGB',(80,60))
+            samples=[(picture,app.calibration_started_at-.1,i) for i in range(1,6)]
+            samples += [(picture,app.calibration_started_at+.7,i) for i in range(6,11)]
+            capture=Mock(read=Mock(side_effect=samples+[None]))
+            old=GazeResult(False,'看按钮',((.3,.5),(.3,.5)))
+            new=GazeResult(False,'看镜头',((.6,.5),(.6,.5)))
+            gaze=Mock(measure=Mock(side_effect=[old]*5+[new]*5))
+            with patch('latest_camera.LatestCamera',return_value=capture),\
+                 patch('chi_camera.FaceFinder') as finder,patch('chi_camera.GazeEstimator',return_value=gaze):
+                finder.return_value.detect.return_value=[face()]
+                app.run_session()
+            gaze.calibrate.assert_called_once()
+            self.assertTrue(all(row.ratios==new.ratios for row in gaze.calibrate.call_args.args[0]))
+
     def test_all_mode_exclusions_skip_gaze_but_keep_other_and_unknown_faces(self):
         verifier=Mock(gallery={'chi':[], 'me':[]})
         verifier.identify.side_effect=[('chi',.9),('me',.9),('unknown',.2)]

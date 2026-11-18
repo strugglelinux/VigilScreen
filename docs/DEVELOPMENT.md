@@ -63,6 +63,8 @@ macOS 托盘的 Cocoa selector 只能把动作写入队列，不能直接调用 
 
 CNN 图表用于观察分类训练；实时身份匹配使用 SFace 登记特征。注视准确率需要人工标注的视频单独评估，不能用身份验证或单类别分类准确率替代。
 
+视线特征、校准稳定性、空间约束与屏幕范围插值见 [GAZE_ALGORITHM.md](GAZE_ALGORITHM.md)。镜头与屏幕参考分开保存于会话中，不复用旧视线结果；新的校准请求使用独立版本和采样窗口，按钮点击后先等待目光移动，再采集当前请求之后的新帧。校准 `ValueError` 代表采样无效，应重采并在超时后保留旧参考，不能因此停止整个监控线程。
+
 ## 测试
 
 ```bash
@@ -74,6 +76,7 @@ python tests/gui_initialization.py
 python tests/gui_training_layout.py
 python tests/gui_annotation_layout.py
 python tests/gui_monitor_layout.py
+python tests/gui_gaze_calibration.py
 python tests/gui_tray.py
 python -B tests/gui_tray.py --tracking --repeat 8
 python -B tests/gui_tray.py --tracking --repeat 8 --burst 25 --late-hide
@@ -84,6 +87,8 @@ GUI 脚本需要图形桌面，使用模拟摄像头；初始化测试只清理�
 `unittest discover` 不执行 `gui_*.py`；修改布局或原生窗口交互时，需要单独执行对应 GUI 脚本。`check_environment.py --models` 会加载真实通用模型并检查空白图和身份特征输出，不访问摄像头，不评价实际身份或注视准确率。
 
 `gui_monitor_layout.py` 检查监控侧栏在小窗口、长截图名、滚轮操作和窗口放大缩小时的布局。开始 / 暂停和退出位于滚动区域外；滚轮仅绑定侧栏控件，不能滚动改变当前命中目标。
+
+`gui_gaze_calibration.py` 使用模拟采集和真实的纯 Python 校准逻辑，检查先校准屏幕中心、再扩展边角、同会话复用摄像头及暂停后清理 UI 校准状态；不代表真实视线准确率。
 
 `gui_annotation_layout.py` 使用临时图片检查两个标记页的空画面引导、冻结、裁剪保存、窗口缩放后侧栏可见性、水平分隔条拖动，以及“用于训练”的目录传递和页面跳转。两个页面共用 `annotation_layout`、`annotation_status` 和 `annotation_actions`，标题、预览底色和分组面板参照实时监测；小窗口下仍须完整显示右侧控件。
 
