@@ -250,6 +250,7 @@ class ChiCamera:
         self._awaiting_scope_frame = False
         self._switch_preview_sequence = None
         self.embedded = embedded
+        self.tray = None
         self.on_close = on_close or self.close
         self.closed = False
         self.want_running = False
@@ -354,6 +355,9 @@ class ChiCamera:
             if self.menu_indicator is not None:
                 self.menu_indicator.pause(args.target)
         self.poll_timer = root.after(50, self.poll)
+        if not embedded:
+            from tray_window import attach_tray
+            self.tray = attach_tray(root,self.menu_indicator,self.close)
 
     def request_calibration(self, kind='camera'):
         if self.args.target is not None and self.args.target in getattr(self,'_excluded',frozenset()):
@@ -917,6 +921,8 @@ class ChiCamera:
             self.menu_indicator.close()
 
     def close(self):
+        if self.tray is not None:
+            self.tray.close()
         self.shutdown()
         def finish():
             if self.worker.is_alive():

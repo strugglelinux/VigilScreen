@@ -13,6 +13,81 @@ def require(condition,message='独立应用自检失败'):
         raise RuntimeError(message)
 
 
+def check_tray_window(root,app):
+    """通过原生最小化事件和托盘菜单验证打包后的恢复路径。"""
+    import time
+    if app.tray is None:
+        app.close()
+        return False
+    from Foundation import NSObject,NSTimer,NSRunLoop,NSDefaultRunLoopMode
+    from AppKit import NSEventTrackingRunLoopMode
+
+    class VigilScreenBundleMenuProbe(NSObject):
+        def selectWindow_(self,timer):
+            self.tracking=NSRunLoop.currentRunLoop().currentMode()==NSEventTrackingRunLoopMode
+            for _ in range(25):
+                self.menu.performActionForItemAtIndex_(0)
+            self.menu.cancelTracking()
+
+        def openMenu_(self,timer):
+            self.item.popUpStatusItemMenu_(self.menu)
+            self.returned=True
+
+    probe=VigilScreenBundleMenuProbe.alloc().init()
+    probe.menu=app.monitor.menu_indicator.menu
+    probe.item=app.monitor.menu_indicator.item
+    errors = []
+    stage = [0]
+    completed = [0]
+    started = time.monotonic()
+    def tick():
+        try:
+            require(time.monotonic()-started<35,'托盘最小化/恢复等待超时')
+            if stage[0]==0:
+                root.iconify()
+                stage[0]=1
+            elif stage[0]==1 and app.tray.hidden and app.tray.settle_timer is None:
+                require(app.tray.application.activationPolicy()==app.tray.accessory_policy,'隐藏后 Dock 策略不正确')
+                require(app.monitor.menu_indicator.item.button().image() is not None,'托盘图标未显示')
+                windows=app.tray.hidden_windows
+                require(bool(windows),'未找到主窗口')
+                require(app.tray.application.isHidden(),'应用尚未隐藏')
+                probe.tracking=False;probe.returned=False
+                probe.selection=NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(.2,probe,'selectWindow:',None,False)
+                probe.opening=NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(.05,probe,'openMenu:',None,False)
+                NSRunLoop.currentRunLoop().addTimer_forMode_(probe.selection,NSEventTrackingRunLoopMode)
+                NSRunLoop.currentRunLoop().addTimer_forMode_(probe.opening,NSDefaultRunLoopMode)
+                stage[0]=2
+            elif stage[0]==2 and not app.tray.hidden and not app.tray.restoring:
+                require(probe.tracking and probe.returned,'原生菜单跟踪循环未正常完成')
+                probe.selection.invalidate();probe.opening.invalidate()
+                require(root.state()=='normal','托盘未恢复窗口')
+                require(root.winfo_ismapped() and app.notebook.winfo_viewable(),'主体界面未映射')
+                windows=[window for window in app.tray.application.windows() if str(window.title())==root.title()]
+                require(bool(windows) and all(window.isVisible() and not window.isMiniaturized() for window in windows),
+                        '原生主窗口未显示')
+                require(not app.tray.application.isHidden(),'应用仍处于隐藏状态')
+                require(app.tray.application.activationPolicy()==app.tray.regular_policy,'恢复后 Dock 策略不正确')
+                completed[0]+=1
+                if completed[0]<4:
+                    root.iconify()
+                    stage[0]=1
+                    root.after(75,tick)
+                    return
+                stage[0]=3
+                app.close()
+                return
+            root.after(75,tick)
+        except Exception:
+            errors.append(traceback.format_exc())
+            app.close()
+    root.after(150,tick)
+    root.mainloop()
+    require(not errors,'\n'.join(errors))
+    require(stage[0]==3,'托盘验证未完成')
+    return True
+
+
 def configure_runtime():
     root = data_root()
     (root/'logs').mkdir(parents=True,exist_ok=True)
@@ -83,7 +158,7 @@ def self_test(report_path):
             if app.monitor.menu_indicator is not None:
                 app.monitor.menu_indicator.show_hit(None,str(screenshot))
                 require('Peek 1' in str(app.monitor.menu_indicator.item.button().title()),'菜单栏提示失败')
-            app.close()
+            tray_verified = check_tray_window(root,app)
         training_report = None
         if classes:
             path,metadata = read_profile(profile)
@@ -105,6 +180,10 @@ def self_test(report_path):
                   'identity_classes':classes,'detected_sample_faces':len(recognized),
                   'native_face_and_gaze_models':True,'torch_gradient_and_optimizer':True,
                   'tk_window_and_menu_bar':True,'startup_camera_closed':True,'camera_accessed':False,
+                  'minimize_to_tray_and_restore':tray_verified,
+                  'native_menu_tracking_verified':tray_verified,
+                  'tray_restore_cycles':4 if tray_verified else 0,
+                  'show_requests_per_cycle':25 if tray_verified else 0,
                   'packaged_training_and_validation':training_report is not None,
                   'validation_images':training_report['images'] if training_report else 0,
                   'screenshot':str(screenshot)}

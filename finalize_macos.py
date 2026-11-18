@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parent
 def main():
     app = ROOT/'dist/VigilScreen.app'
     self_test = json.loads((ROOT/'build/standalone-self-test.json').read_text())
-    if not self_test.get('ok') or not self_test.get('frozen'):
-        raise RuntimeError('请先完成独立应用自检。')
+    if not self_test.get('ok') or not self_test.get('frozen') or not self_test.get('minimize_to_tray_and_restore'):
+        raise RuntimeError('请先完成独立应用自检（包括托盘最小化与恢复）。')
     prepare_licenses()
     shutil.copytree(ROOT/'build/licenses',app/'Contents/Resources/licenses',dirs_exist_ok=True)
     subprocess.run(['/usr/bin/codesign','--force','--sign','-','--timestamp=none',
@@ -39,11 +39,13 @@ def main():
         for chunk in iter(lambda:stream.read(1024*1024),b''):
             digest.update(chunk)
     size = sum(path.stat().st_size for path in regular_files(app))
-    report = {'application':app.name,'archive':archive.name,'version':'1.0.0',
+    revision = subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,capture_output=True,text=True)
+    report = {'application':app.name,'archive':archive.name,'version':'1.1.1',
+              'source_commit':revision.stdout.strip() if revision.returncode==0 else None,
               'architecture':'arm64 (Apple Silicon)','minimum_macos':'15.0',
               'application_bytes':size,'archive_bytes':archive.stat().st_size,
               'archive_sha256':digest.hexdigest(),'compression':'ULMO (LZMA)',
-              'source_tests_passed':67,'bundle_signature_verified':True,
+              'source_tests_passed':86,'bundle_signature_verified':True,
               'signing':'ad-hoc; not Apple-notarized','archive_integrity_verified':True,
               'size_optimization':json.loads((ROOT/'build/size-optimization.json').read_text()),
               'standalone_relocated_self_test':self_test,'native_dependency_audit':audit}

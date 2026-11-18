@@ -17,6 +17,7 @@ os.environ.setdefault('MKL_NUM_THREADS','1')
 from chi_camera import ChiCamera,build_parser
 from gui import TrainingWindow
 from initialization import reset_project_data
+from tray_window import attach_tray
 
 
 class VigilScreen:
@@ -26,6 +27,7 @@ class VigilScreen:
         self.resetting = False
         self.tab_generation = 0
         self.autostart = autostart
+        self.tray = None
         root.title('VigilScreen · 视线监测与身份训练')
         root.geometry(f'{min(1280,root.winfo_screenwidth()-70)}x{min(850,root.winfo_screenheight()-90)}')
         root.minsize(1040,680)
@@ -51,6 +53,7 @@ class VigilScreen:
         self.studio = TrainingWindow(studio_frame,embedded=True,on_trained=self.model_trained,
                                      camera_guard=lambda:not self.monitor.worker.is_alive())
         self.notebook.bind('<<NotebookTabChanged>>',self.change_tab)
+        self.tray = attach_tray(root,self.monitor.menu_indicator,self.close,self.tray)
 
     def change_tab(self,event=None):
         self.tab_generation += 1
@@ -164,6 +167,8 @@ class VigilScreen:
         if self.closing or self.resetting:
             return
         self.closing = True
+        if self.tray is not None:
+            self.tray.close()
         self.root.withdraw()
         self.monitor.shutdown()
         self.studio.stop_camera()

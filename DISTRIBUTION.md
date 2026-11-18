@@ -6,6 +6,8 @@
 
 应用包含监控、目标选择、多选过滤、图片与摄像头标记裁剪、模型训练、身份效果验证、Peek 菜单栏提示、红框截图及初始化功能。它内置 Python、Torch、OpenCV、MediaPipe、Tk 与必要的视觉模型；没有通过删除训练功能来缩小体积。
 
+macOS 最小化时隐藏到顶部眼睛托盘图标，Dock 图标与窗口缩略图隐藏，后台任务继续。点击图标选择“显示主窗口”恢复，或选择“退出 VigilScreen”结束任务。系统摄像头隐私图标独立保留。
+
 用户数据保存于 `~/Library/Application Support/VigilScreen/`。若本地构建时包含训练材料和身份模型，首次启动会复制这些资源；干净源码构建不携带个人材料。历史命中截图不打包。之后训练、截图和初始化都操作此用户目录，不改动应用包及源码项目。初始化后不会重新导入内置材料。诊断日志位于该目录的 `logs/application.log`。
 
 体积优化包括仅保留 arm64、排除 TensorFlow/JAX/SciPy 等未使用依赖、限制 Matplotlib 为 MediaPipe 所需的 Agg 后端、删除开发文件和未使用的 protobuf 编译器、裁剪动态库符号，并使用压缩磁盘映像发布。PyTorch 的本地训练库是体积的主要组成部分。精确体积和验证结果见 `dist/build-report.json`。

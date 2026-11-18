@@ -26,7 +26,8 @@ exe = EXE(pyz,a.scripts,[],exclude_binaries=True,name='VigilScreen',debug=False,
           codesign_identity=None,entitlements_file=str(project/'macos_entitlements.plist'))
 coll = COLLECT(exe,a.binaries,a.datas,strip=True,upx=False,name='VigilScreen')
 app = BUNDLE(coll,name='VigilScreen.app',bundle_identifier='local.vigilscreen.desktop',
-             info_plist={'CFBundleDisplayName':'VigilScreen','CFBundleShortVersionString':'1.0.0',
+             info_plist={'CFBundleDisplayName':'VigilScreen','CFBundleShortVersionString':'1.1.1',
+                         'CFBundleVersion':'1.1.1',
                          'NSCameraUsageDescription':'点击开始监控或摄像头标记时，采集图像以检查注视方向、识别身份和保存训练图片。',
                          'NSHighResolutionCapable':True,'LSMinimumSystemVersion':'15.0',
                          'NSPrincipalClass':'NSApplication'})
