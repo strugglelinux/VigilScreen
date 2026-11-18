@@ -1,3 +1,7 @@
+This directory is distributed with the source repository, including all three generic model files, the checksum manifest, source information, and licenses. Personal training images, enrollment templates, and trained identity models are not stored here.
+
+Run `python download_models.py --check` from the project root to verify the bundled files against `models.json`. Run `python download_models.py` to restore missing or damaged models; already valid files are kept.
+
 YuNet face detector: `yunet.onnx` is OpenCV Zoo's `face_detection_yunet_2023mar.onnx`.
 Source: https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
 Download: https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx

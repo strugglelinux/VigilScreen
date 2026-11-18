@@ -2,7 +2,7 @@
 
 ## 环境与资源
 
-先按 README 创建虚拟环境、安装运行依赖，并执行 `python download_models.py`。通用模型清单在 `face_models/models.json`，下载脚本检查 SHA-256、使用临时文件下载，校验通过后才替换目标文件。`--check` 只验证本地文件，不访问网络。
+先按 README 创建虚拟环境、安装运行依赖，并执行 `python download_models.py --check`。通用模型与 `face_models/models.json` 随源码分发；文件缺失或损坏时运行 `python download_models.py`，脚本检查 SHA-256、使用临时文件下载，校验通过后才替换目标文件。`--check` 只验证本地文件，不访问网络。
 
 开发构建依赖单独安装：
 
@@ -105,6 +105,6 @@ GUI 脚本需要图形桌面，使用模拟摄像头；初始化测试只清理�
 
 ## 提交范围
 
-提交 Python 源码、测试源码、Markdown 文档、依赖清单、构建脚本及配置、通用模型清单和第三方许可。不要提交训练图片、身份特征、权重、截图、模型二进制、虚拟环境、缓存、安装包及本地验证/构建报告。
+提交 Python 源码、测试源码、Markdown 文档、依赖清单、构建脚本及配置，以及 `face_models/` 内的通用模型、校验清单和第三方许可。`.gitignore` 只对该目录的 ONNX / MediaPipe 模型放行；不要提交训练图片、个人身份特征、个人训练权重、截图、其他模型二进制、虚拟环境、缓存、安装包及本地验证/构建报告。
 
 `.gitignore` 同时覆盖整个运行数据目录及常见图片、视频和模型扩展名；提交前仍应检查 `git diff --cached --stat` 与 `git diff --cached --name-only`。

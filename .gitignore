@@ -23,6 +23,9 @@ venv/
 *.npy
 *.onnx
 *.task
+# 随源码分发的通用视觉模型；个人模型和训练输出仍忽略。
+!/face_models/*.onnx
+!/face_models/*.task
 *.jpg
 *.jpeg
 *.png
