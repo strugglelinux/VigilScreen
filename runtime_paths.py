@@ -13,7 +13,11 @@ def data_root():
     if override:
         return Path(override).expanduser().resolve()
     if getattr(sys,'frozen',False):
-        return Path.home()/'Library/Application Support/VigilScreen'
+        if sys.platform=='darwin':
+            return Path.home()/'Library/Application Support/VigilScreen'
+        if sys.platform=='win32':
+            return Path(os.environ.get('LOCALAPPDATA') or Path.home()/'AppData/Local')/'VigilScreen'
+        return Path(os.environ.get('XDG_DATA_HOME') or Path.home()/'.local/share')/'VigilScreen'
     return RESOURCE_ROOT
 
 
@@ -39,7 +43,9 @@ def initialize_app_data():
                 target.parent.mkdir(parents=True,exist_ok=True)
                 if not target.exists():
                     if source.suffix=='.json':
-                        target.write_text(source.read_text(encoding='utf-8').replace('__VIGILSCREEN_DATA__',str(root)),encoding='utf-8')
+                        # Windows 路径含反斜杠，不能直接替换原始 JSON 文本。
+                        replacement=json.dumps(str(root),ensure_ascii=False)[1:-1]
+                        target.write_text(source.read_text(encoding='utf-8').replace('__VIGILSCREEN_DATA__',replacement),encoding='utf-8')
                     else:
                         shutil.copy2(source,target)
     # 保留标记，用户点击初始化后不能再次自动恢复内置身份和训练图片。

@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .cache/
+.ci-user-data/
 .venv/
 venv/
 .DS_Store

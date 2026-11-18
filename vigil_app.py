@@ -1,11 +1,13 @@
 """独立应用入口，统一窗口、训练子进程和离线打包自检。"""
 import json
 import os
+import platform
 from pathlib import Path
 import sys
 import traceback
 
 from runtime_paths import RESOURCE_ROOT,data_root,initialize_app_data
+from runtime_support import configure_process_environment,restore_worker_stream,worker_process_options
 
 
 def require(condition,message='独立应用自检失败'):
@@ -18,6 +20,7 @@ def check_tray_window(root,app):
     import time
     if app.tray is None:
         app.close()
+        root.mainloop()
         return False
     from Foundation import NSObject,NSTimer,NSRunLoop,NSDefaultRunLoopMode
     from AppKit import NSEventTrackingRunLoopMode
@@ -91,16 +94,13 @@ def check_tray_window(root,app):
 def configure_runtime():
     root = data_root()
     (root/'logs').mkdir(parents=True,exist_ok=True)
-    os.environ.setdefault('OMP_NUM_THREADS','1')
-    os.environ.setdefault('MKL_NUM_THREADS','1')
+    configure_process_environment()
     os.environ.setdefault('MPLCONFIGDIR',str(root/'.cache/matplotlib'))
     os.environ.setdefault('MPLBACKEND','Agg')
     if '--identity-worker' in sys.argv:
-        if sys.stdout is None:
-            sys.stdout = os.fdopen(os.dup(1),'w',buffering=1)
-        if sys.stderr is None:
-            sys.stderr = os.fdopen(os.dup(2),'w',buffering=1)
-    elif getattr(sys,'frozen',False):
+        restore_worker_stream('stdout',1,root/'logs')
+        restore_worker_stream('stderr',2,root/'logs')
+    elif getattr(sys,'frozen',False) or sys.stdout is None or sys.stderr is None:
         sys.stdout = sys.stderr = (root/'logs/application.log').open('a',encoding='utf-8',buffering=1)
 
 
@@ -166,17 +166,19 @@ def self_test(report_path):
             output = root_path/'diagnostics/training'
             command = worker_command('train','--data-dir',materials,'--output-dir',output,
                                      '--epochs','1','--batch-size','4','--device','cpu')
-            completed = subprocess.run(command,cwd=root_path,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=180)
+            completed = subprocess.run(command,cwd=root_path,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+                                       text=True,timeout=180,**worker_process_options())
             (root_path/'diagnostics/worker.log').write_text(completed.stdout,encoding='utf-8')
             require(completed.returncode==0,completed.stdout[-4000:])
             require((output/'active_profile.json').is_file(),'训练未生成身份模型')
             completed = subprocess.run(worker_command('validate','--profile',output/'active_profile.json',
                                         '--output',output/'revalidation.json'),cwd=root_path,
-                                       stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=120)
+                                       stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=120,**worker_process_options())
             require(completed.returncode==0,completed.stdout[-4000:])
             training_report = json.loads((output/'revalidation.json').read_text())
         report = {'ok':True,'frozen':bool(getattr(sys,'frozen',False)),
-                  'architecture':os.uname().machine,'resources':str(RESOURCE_ROOT),'data_root':str(root_path),
+                  'architecture':platform.machine(),'platform':sys.platform,
+                  'resources':str(RESOURCE_ROOT),'data_root':str(root_path),
                   'identity_classes':classes,'detected_sample_faces':len(recognized),
                   'native_face_and_gaze_models':True,'torch_gradient_and_optimizer':True,
                   'tk_window_and_menu_bar':True,'startup_camera_closed':True,'camera_accessed':False,

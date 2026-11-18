@@ -14,6 +14,26 @@ def image_files(directory: Path) -> list[Path]:
     return sorted(p.resolve() for p in directory.rglob('*')
                   if p.is_file() and p.suffix.lower() in EXTENSIONS)
 
+
+def existing_categories(directory: Path) -> list[str]:
+    """发现已有类别，不要求图片曾经由本程序标记，也不创建或修改目录。"""
+    def valid(name):
+        return (isinstance(name,str) and bool(name.strip()) and not name.startswith('.')
+                and name not in {'train','val','test'} and not any(c in name for c in '/\\:'))
+    names=set()
+    directory=directory.expanduser()
+    try:
+        names.update(child.name for child in directory.iterdir() if child.is_dir() and valid(child.name))
+    except OSError:
+        pass
+    try:
+        labels=json.loads((directory/'.labels.json').read_text(encoding='utf-8'))
+        if isinstance(labels,dict):
+            names.update(name for name in labels.values() if valid(name))
+    except (OSError,ValueError):
+        pass
+    return sorted(names)
+
 def selection_box(start, end, display_box, image_size):
     """把预览画布上的拖拽坐标映射为原图像素，支持反向拖拽与越界截断。"""
     x, y, width, height = display_box

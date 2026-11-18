@@ -1,0 +1,75 @@
+name: Intel Mac and Windows compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Build and self-test native packages (no personal data)
+        type: boolean
+        default: false
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            requirements: requirements-macos-intel.txt
+          - runner: windows-2022
+            requirements: requirements-windows.txt
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      VIGILSCREEN_CPU_THREADS: '2'
+      VIGILSCREEN_DATA_DIR: ${{ github.workspace }}/.ci-user-data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r ${{ matrix.requirements }}
+      - run: python -m pip check
+      - run: python -m unittest discover -s tests -v
+      - run: python download_models.py
+      - run: python check_environment.py --models
+      - if: inputs.package
+        run: python -m pip install "pyinstaller>=6,<7"
+      - if: inputs.package && runner.os == 'macOS'
+        run: python build_macos.py --arch x86_64
+      - if: inputs.package && runner.os == 'Windows'
+        run: python build_windows.py
+      - if: inputs.package && runner.os == 'macOS'
+        run: dist/VigilScreen.app/Contents/MacOS/VigilScreen --self-test build/standalone-self-test.json
+      - if: inputs.package && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $executable = (Resolve-Path 'dist/VigilScreen/VigilScreen.exe').Path
+          $report = Join-Path $PWD 'build/standalone-self-test.json'
+          $process = Start-Process -FilePath $executable -ArgumentList @('--self-test', $report) -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Self-test exited $($process.ExitCode)" }
+          $result = Get-Content -Raw -Encoding UTF8 $report | ConvertFrom-Json
+          if (-not $result.ok -or -not $result.frozen) { throw 'Standalone self-test failed' }
+      - if: inputs.package && runner.os == 'macOS'
+        run: python finalize_macos.py
+      - if: inputs.package && runner.os == 'Windows'
+        run: python -c "import shutil; shutil.make_archive('dist/VigilScreen-Windows-x86_64', 'zip', 'dist', 'VigilScreen')"
+      - if: inputs.package
+        uses: actions/upload-artifact@v4
+        with:
+          name: VigilScreen-${{ runner.os }}-x86_64
+          path: |
+            dist/VigilScreen-macOS-x86_64.dmg
+            dist/VigilScreen-Windows-x86_64.zip
+            build/standalone-self-test.json

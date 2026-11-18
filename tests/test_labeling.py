@@ -8,11 +8,27 @@ from pathlib import Path
 import tempfile
 import unittest
 from PIL import Image
-from labeling import LabelStore
+from labeling import LabelStore,existing_categories
 from data import build_datasets
 
 
 class LabelingTests(unittest.TestCase):
+    def test_existing_categories_merge_directories_and_manifest_without_modifying_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            for name in ('chi','me','.cache','train','val','test'):
+                (root/name).mkdir()
+            manifest=root/'.labels.json'
+            content='{"one":"chi","two":"旧类别","bad":[],"empty":"","reserved":"train"}'
+            manifest.write_text(content,encoding='utf-8')
+            self.assertEqual(existing_categories(root),['chi','me','旧类别'])
+            self.assertEqual(manifest.read_text(encoding='utf-8'),content)
+            manifest.write_text('invalid json',encoding='utf-8')
+            self.assertEqual(existing_categories(root),['chi','me'])
+            missing=root/'missing'
+            self.assertEqual(existing_categories(missing),[])
+            self.assertFalse(missing.exists())
+
     def test_crop_persists_and_source_is_preserved_when_relabeling(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

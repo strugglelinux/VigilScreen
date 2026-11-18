@@ -167,6 +167,63 @@ class IdentitySwitchTests(unittest.TestCase):
             self.assertFalse(app.switching)
             self.assertIsNone(app.args.target)
 
+    def test_switch_does_not_wait_for_screenshot_and_discards_staged_old_hit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app=self.worker(directory)
+            app._transition_lock=threading.Lock()
+            app.target_var=Mock(get=Mock(return_value='chi'))
+            app.available_targets=(ALL_PEOPLE,'chi')
+            app.refreshing=False;app.want_running=True;app.last_frame=None
+            for name in ('menu_indicator','target_choice','refresh_button','start_button',
+                         'switch_status','status','gaze_status'):
+                setattr(app,name,Mock())
+            picture=Image.new('RGB',(80,60))
+            capture=Mock(read=Mock(side_effect=[(picture,time.monotonic(),1),None]))
+            writing=threading.Event();release=threading.Event();selected=threading.Event()
+            original_save=Image.Image.save
+            def slow_save(image,*args,**kwargs):
+                writing.set()
+                if not release.wait(3):
+                    raise AssertionError('截图写入未解除')
+                return original_save(image,*args,**kwargs)
+            def select():
+                app.change_target()
+                selected.set()
+            with patch('latest_camera.LatestCamera',return_value=capture),\
+                 patch('chi_camera.FaceFinder') as finder,\
+                 patch('chi_camera.GazeEstimator',return_value=Mock(measure=Mock(return_value=GazeResult(True,'test')))),\
+                 patch.object(Image.Image,'save',new=slow_save):
+                finder.return_value.detect.return_value=[FACE]
+                worker=threading.Thread(target=app.run_session)
+                worker.start()
+                selector=None
+                try:
+                    self.assertTrue(writing.wait(2))
+                    selector=threading.Thread(target=select)
+                    selector.start()
+                    self.assertTrue(selected.wait(1),'切换目标不能等待截图编码或写盘')
+                    self.assertEqual(app._pending_switch,(1,'chi'))
+                finally:
+                    release.set();worker.join(3)
+                    if selector is not None:
+                        selector.join(3)
+                self.assertFalse(worker.is_alive())
+            self.assertFalse(list(app.args.output_dir.iterdir()))
+            self.assertFalse([value for kind,value in app.events.queue if kind in {'hit','error'}])
+
+    def test_open_menu_defers_rendering_without_consuming_latest_frame(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app=self.worker(directory)
+            app.closed=False;app.root=Mock();app.draw_frame=Mock()
+            app.menu_interaction_active=Mock(return_value=True)
+            app.frames.put((Image.new('RGB',(80,60)),[]))
+            app.events.put(('hit',('saved.jpg',1)))
+            app.poll()
+            app.draw_frame.assert_not_called()
+            self.assertEqual(app.frames.qsize(),1)
+            self.assertEqual(app.events.qsize(),1)
+            app.root.after.assert_called_once_with(60,app.poll)
+
     def test_all_mode_with_exclusions_loads_identity_and_never_saves_excluded_box(self):
         with tempfile.TemporaryDirectory() as directory:
             app=self.worker(directory)

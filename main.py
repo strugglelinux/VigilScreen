@@ -8,11 +8,11 @@ import tkinter as tk
 from tkinter import messagebox,ttk
 
 from runtime_paths import data_root
+from runtime_support import configure_process_environment
 ROOT = data_root()
 os.environ.setdefault('MPLCONFIGDIR',str(ROOT/'.cache/matplotlib'))
 os.environ.setdefault('MPLBACKEND','Agg')
-os.environ.setdefault('OMP_NUM_THREADS','1')
-os.environ.setdefault('MKL_NUM_THREADS','1')
+configure_process_environment()
 
 from chi_camera import ChiCamera,build_parser
 from gui import TrainingWindow
@@ -31,12 +31,13 @@ class VigilScreen:
         root.title('VigilScreen · 视线监测与身份训练')
         root.geometry(f'{min(1280,root.winfo_screenwidth()-70)}x{min(850,root.winfo_screenheight()-90)}')
         root.minsize(1040,680)
-        toolbar = ttk.Frame(root,padding=(12,8))
-        toolbar.pack(fill='x')
         self.app_status = tk.StringVar(value='点击开始监控后才打开摄像头')
-        ttk.Label(toolbar,textvariable=self.app_status).pack(side='left')
-        self.initialize_button = ttk.Button(toolbar,text='初始化',command=self.initialize)
-        self.initialize_button.pack(side='right')
+        self.menu_bar = tk.Menu(root)
+        self.actions_menu = tk.Menu(self.menu_bar,tearoff=False)
+        self.actions_menu.add_command(label='初始化…',command=self.initialize)
+        self.initialize_menu_index = self.actions_menu.index('end')
+        self.menu_bar.add_cascade(label='操作',menu=self.actions_menu)
+        root.configure(menu=self.menu_bar)
         self.build_views()
         root.protocol('WM_DELETE_WINDOW',self.close)
 
@@ -48,10 +49,15 @@ class VigilScreen:
         studio_frame = ttk.Frame(self.notebook)
         self.notebook.add(monitor_frame,text='实时监测')
         self.notebook.add(studio_frame,text='标记 · 训练 · 验证')
-        self.monitor = ChiCamera(monitor_frame,build_parser().parse_args([]),embedded=True,
+        self.monitor_hint = ttk.Label(monitor_frame,textvariable=self.app_status,padding=(12,6))
+        self.monitor_hint.pack(fill='x')
+        monitor_content = ttk.Frame(monitor_frame)
+        monitor_content.pack(fill='both',expand=True)
+        self.monitor = ChiCamera(monitor_content,build_parser().parse_args([]),embedded=True,
                                  autostart=False,on_close=self.close)
         self.studio = TrainingWindow(studio_frame,embedded=True,on_trained=self.model_trained,
-                                     camera_guard=lambda:not self.monitor.worker.is_alive())
+                                     camera_guard=lambda:not self.monitor.worker.is_alive(),
+                                     identity_provider=lambda:self.monitor.available_targets[1:])
         self.notebook.bind('<<NotebookTabChanged>>',self.change_tab)
         self.tray = attach_tray(root,self.monitor.menu_indicator,self.close,self.tray)
 
@@ -96,7 +102,7 @@ class VigilScreen:
         self.resetting = True
         self.tab_generation += 1
         self.autostart = False
-        self.initialize_button.configure(state='disabled')
+        self.actions_menu.entryconfigure(self.initialize_menu_index,state='disabled')
         self.app_status.set('正在初始化：停止监控、摄像头与训练任务…')
         dialog = tk.Toplevel(self.root)
         dialog.title('正在初始化')
@@ -154,7 +160,7 @@ class VigilScreen:
     def end_initialization(self,error=None):
         self.reset_dialog.destroy()
         self.resetting = False
-        self.initialize_button.configure(state='normal')
+        self.actions_menu.entryconfigure(self.initialize_menu_index,state='normal')
         if error is not None:
             self.app_status.set('初始化未完成，请检查提示后重试')
             messagebox.showerror('初始化未完成',error,parent=self.root)

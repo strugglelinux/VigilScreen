@@ -1,0 +1,12 @@
+# Python 3.11 x86_64，macOS 13+。独立列出，便于校验目标架构轮子。
+torch==2.2.2
+torchvision==0.17.2
+sympy==1.12
+numpy==1.26.4
+Pillow>=10.0,<13
+opencv-contrib-python==4.11.0.86
+mediapipe==0.10.21
+jax==0.4.30
+jaxlib==0.4.30
+pyobjc-framework-Cocoa==10.3.2
+pyobjc-core==10.3.2

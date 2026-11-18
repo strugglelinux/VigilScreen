@@ -1,0 +1,5 @@
+# Intel / AMD x64 均使用同一 CPU 版，不需要 CUDA 或 AMD 显卡。
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+torchvision==0.21.0+cpu
+-r requirements.txt

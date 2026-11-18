@@ -6,7 +6,14 @@ import math
 import random
 from pathlib import Path
 
+from runtime_support import (configure_process_environment,cpu_thread_budget,
+                             native_architecture)
+import sys
+
+configure_process_environment()
+
 import torch
+torch.set_num_threads(cpu_thread_budget())
 from PIL import Image, ImageOps
 from torch import nn
 from torch.utils.data import DataLoader
@@ -21,11 +28,12 @@ ROOT = data_root()
 def select_device(name: str) -> torch.device:
     if name == "auto":
         name = "cuda" if torch.cuda.is_available() else (
-            "mps" if torch.backends.mps.is_available() else "cpu"
+            "mps" if sys.platform=='darwin' and native_architecture()=='arm64'
+            and getattr(torch.backends,'mps',None) is not None and torch.backends.mps.is_available() else "cpu"
         )
     if name == "cuda" and not torch.cuda.is_available():
         raise ValueError("CUDA 不可用，请选择 --device cpu 或 auto。")
-    if name == "mps" and not torch.backends.mps.is_available():
+    if name == "mps" and (getattr(torch.backends,'mps',None) is None or not torch.backends.mps.is_available()):
         raise ValueError("MPS 不可用，请选择 --device cpu 或 auto。")
     return torch.device(name)
 

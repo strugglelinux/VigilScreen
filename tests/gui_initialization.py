@@ -58,7 +58,7 @@ def main():
                         app.monitor.start_button.invoke()
                         stage[0]=1
                     elif stage[0]==1 and app.monitor.last_frame is not None:
-                        app.initialize_button.invoke()  # 取消确认应当保持监控和全部数据。
+                        app.actions_menu.invoke(app.initialize_menu_index)  # 取消确认应当保持监控和全部数据。
                         assert not app.resetting and app.monitor.want_running
                         cleanup.assert_not_called()
                         assert (sandbox/'data/labeled/me/face.png').exists()
@@ -68,7 +68,7 @@ def main():
                         training.poll.return_value=None
                         training.terminate.side_effect=lambda:setattr(training.poll,'return_value',0)
                         app.studio.process=training
-                        app.initialize_button.invoke()
+                        app.actions_menu.invoke(app.initialize_menu_index)
                         assert app.resetting
                         stage[0]=2
                     elif stage[0]==2 and not app.resetting:

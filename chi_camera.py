@@ -48,7 +48,7 @@ class HitGate:
         return False
 
 
-def save_hit(picture, directory, face_boxes=()):
+def save_hit(picture, directory, face_boxes=(),commit=None):
     """在原尺寸副本上标注当前命中的人脸，不修改采集和预览原图。"""
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f'vigil_hit_{datetime.now():%Y%m%d_%H%M%S_%f}_{uuid4().hex[:8]}.jpg'
@@ -61,8 +61,15 @@ def save_hit(picture, directory, face_boxes=()):
         bottom = min(screenshot.height-1, int(y+height)-1)
         if right > left and bottom > top:
             draw.rectangle((left,top,right,bottom),outline=(255,0,0),width=line_width)
-    screenshot.save(path, quality=95)
-    return path
+    staged=path.with_name('.'+path.name+'.pending')
+    try:
+        screenshot.save(staged,format='JPEG',quality=95)
+        if commit is None:
+            staged.replace(path)
+            return path
+        return path if commit(staged,path) else None
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def validate_target(classes, target):
@@ -85,6 +92,8 @@ def is_front_facing(landmarks):
 class FaceFinder:
     def __init__(self, model_path):
         import cv2
+        from runtime_support import configure_opencv
+        configure_opencv(cv2)
         self.detector = cv2.FaceDetectorYN.create(str(model_path), '', (320, 320), 0.8, 0.3, 5000)
 
     def _detect_region(self, picture):
@@ -300,10 +309,22 @@ class ChiCamera:
         self.performance_label.grid(row=2,column=0,sticky='ew')
         self.legend_label = ttk.Label(video,text='红：满足命中条件   蓝：已识别   绿：me   灰：未确认',wraplength=600)
         self.legend_label.grid(row=3,column=0,sticky='ew',pady=(6,0))
-        sidebar = ttk.Frame(body,width=292)
-        sidebar.grid(row=0,column=1,sticky='ns')
+        self.sidebar = ttk.Frame(body)
+        self.sidebar.grid(row=0,column=1,sticky='nsew')
+        self.sidebar.columnconfigure(0,weight=1)
+        self.sidebar.rowconfigure(0,weight=1)
+        self.sidebar_canvas=tk.Canvas(self.sidebar,width=312,height=1,highlightthickness=0,
+                                      bg=style.lookup('TFrame','background') or '#ececec')
+        self.sidebar_canvas.grid(row=0,column=0,sticky='nsew')
+        self.sidebar_scrollbar=ttk.Scrollbar(self.sidebar,orient='vertical',command=self.sidebar_canvas.yview)
+        self.sidebar_scrollbar.grid(row=0,column=1,sticky='ns')
+        self.sidebar_canvas.configure(yscrollcommand=self.sidebar_scrollbar.set)
+        sidebar=ttk.Frame(self.sidebar_canvas)
+        self.sidebar_content=sidebar
+        self.sidebar_window=self.sidebar_canvas.create_window(0,0,window=sidebar,anchor='nw')
+        sidebar.bind('<Configure>',self.update_sidebar_scroll)
+        self.sidebar_canvas.bind('<Configure>',self.update_sidebar_scroll)
         sidebar.columnconfigure(0,weight=1)
-        sidebar.rowconfigure(6,weight=1)
         target_box = ttk.LabelFrame(sidebar,text='命中目标',padding=12)
         target_box.grid(row=0,column=0,sticky='ew',pady=(0,12))
         self.available_targets = (ALL_PEOPLE,)
@@ -337,10 +358,21 @@ class ChiCamera:
         self.refresh_button = ttk.Button(sidebar,text='刷新模型 / 身份样本',command=self.request_refresh,state='disabled')
         self.refresh_button.grid(row=4,column=0,sticky='ew',pady=(0,6))
         ttk.Button(sidebar,text='查看模型与样本详情',command=self.show_model_details).grid(row=5,column=0,sticky='ew')
-        ttk.Button(sidebar,text='退出并关闭摄像头',command=self.on_close).grid(row=7,column=0,sticky='ew')
-        self.start_button = ttk.Button(sidebar,text='开始监控',command=self.toggle_monitor)
-        self.start_button.grid(row=3,column=0,sticky='ew',pady=(0,6))
+        footer=ttk.Frame(self.sidebar,padding=(0,8,0,0))
+        footer.grid(row=1,column=0,columnspan=2,sticky='ew')
+        self.start_button = ttk.Button(footer,text='开始监控',command=self.toggle_monitor)
+        self.start_button.pack(fill='x',pady=(0,6))
+        self.exit_button=ttk.Button(footer,text='退出并关闭摄像头',command=self.on_close)
+        self.exit_button.pack(fill='x')
         ttk.Button(target_actions,text='加载身份模型',command=self.choose_profile).pack(side='right')
+        # 只在本侧栏内处理滚轮，不影响视频、工作室或弹出的原生菜单。
+        widgets=[self.sidebar_canvas,sidebar]
+        while widgets:
+            widget=widgets.pop()
+            widgets.extend(widget.winfo_children())
+            widget.bind('<MouseWheel>',self.scroll_sidebar,add='+')
+            widget.bind('<Button-4>',self.scroll_sidebar,add='+')
+            widget.bind('<Button-5>',self.scroll_sidebar,add='+')
         if not embedded:
             root.protocol('WM_DELETE_WINDOW',self.close)
         self.worker = threading.Thread(target=self.run,daemon=True)
@@ -358,6 +390,28 @@ class ChiCamera:
         if not embedded:
             from tray_window import attach_tray
             self.tray = attach_tray(root,self.menu_indicator,self.close)
+
+    def update_sidebar_scroll(self,event=None):
+        width=self.sidebar_canvas.winfo_width()
+        if width<=1:
+            return
+        if int(self.sidebar_canvas.itemcget(self.sidebar_window,'width'))!=width:
+            self.sidebar_canvas.itemconfigure(self.sidebar_window,width=width)
+        height=self.sidebar_content.winfo_reqheight()
+        self.sidebar_canvas.configure(scrollregion=(0,0,width,max(height,self.sidebar_canvas.winfo_height())))
+
+    def scroll_sidebar(self,event):
+        if self.menu_interaction_active():
+            return
+        if getattr(event,'num',None) in (4,5):
+            units=-2 if event.num==4 else 2
+        else:
+            delta=getattr(event,'delta',0)
+            if not delta:
+                return
+            units=-int(delta/120) if abs(delta)>=120 else (-1 if delta>0 else 1)
+        self.sidebar_canvas.yview_scroll(units,'units')
+        return 'break'
 
     def request_calibration(self, kind='camera'):
         if self.args.target is not None and self.args.target in getattr(self,'_excluded',frozenset()):
@@ -739,11 +793,14 @@ class ChiCamera:
                     hits = []
                 else:
                     hits,_ = tracker.update(rows,time.monotonic())
-                with self.transition_lock():
-                    if (hits and self.current_scope()==scope and not getattr(self,'switching',False)
-                            and not self.stop_event.is_set() and not self.refresh_request.is_set()):
-                        path = save_hit(picture,self.args.output_dir,face_boxes=[row[:4] for row in rows if row[6]])
-                        events.put(('hit',(str(path),len(hits))))
+                if hits and self.hit_scope_active(scope):
+                    # JPEG 编码和文件写入不能持有界面切换也要获取的锁。
+                    path=save_hit(picture,self.args.output_dir,
+                                  face_boxes=[row[:4] for row in rows if row[6]],
+                                  commit=lambda source,destination:self.commit_hit(scope,source,destination))
+                    with self.transition_lock():
+                        if path is not None and self.hit_scope_active(scope):
+                            events.put(('hit',(str(path),len(hits))))
                 self.publish_frame(picture,rows,scope=scope)
         except Exception as error:
             if not self.stop_event.is_set():
@@ -755,6 +812,17 @@ class ChiCamera:
             self.active_camera = None
             if gaze is not None:
                 gaze.close()
+
+    def hit_scope_active(self,scope):
+        return (self.current_scope()==scope and not getattr(self,'switching',False)
+                and not self.stop_event.is_set() and not self.refresh_request.is_set())
+
+    def commit_hit(self,scope,source,destination):
+        with self.transition_lock():
+            if not self.hit_scope_active(scope):
+                return False
+            source.replace(destination)
+            return True
 
     def publish_frame(self, picture, results, scope=None):
         frames = self.frames
@@ -843,6 +911,10 @@ class ChiCamera:
     def poll(self):
         if self.closed:
             return
+        if self.menu_interaction_active():
+            # Aqua 下拉框使用原生菜单跟踪循环；优先响应菜单，保留最新检测帧。
+            self.poll_timer=self.root.after(60,self.poll)
+            return
         if (getattr(self,'switching',False) or getattr(self,'_awaiting_scope_frame',False)) and self.active_camera is not None:
             sample = self.active_camera.latest
             if isinstance(sample,tuple) and len(sample)==3 and sample[2]!=self._switch_preview_sequence:
@@ -856,7 +928,12 @@ class ChiCamera:
         except queue.Empty:
             pass
         try:
-            while True:
+            # 限制一次轮询处理量，避免展开菜单期间积累的消息占满 Tk 主线程。
+            deadline=time.monotonic()+.006
+            latest_performance=None
+            for _ in range(64):
+                if time.monotonic()>=deadline:
+                    break
                 kind, value = self.events.get_nowait()
                 if kind == 'hit':
                     if not self.refreshing:
@@ -864,7 +941,7 @@ class ChiCamera:
                 elif kind == 'gaze':
                     self.gaze_status.set(value)
                 elif kind == 'performance':
-                    self.performance.set(value)
+                    latest_performance=value
                 elif kind == 'model':
                     self.model_info.set(value)
                     self.refreshing = False
@@ -900,8 +977,19 @@ class ChiCamera:
                     self.refresh_button.configure(state='normal')
         except queue.Empty:
             pass
+        if latest_performance is not None:
+            self.performance.set(latest_performance)
         if not self.closed:
             self.poll_timer = self.root.after(20,self.poll)
+
+    def menu_interaction_active(self):
+        if sys.platform=='darwin':
+            from menu_bar import native_menu_tracking
+            if native_menu_tracking():
+                return True
+        popdown=str(self.target_choice)+'.popdown'
+        return bool(self.root.tk.call('winfo','exists',popdown)
+                    and self.root.tk.call('winfo','ismapped',popdown))
 
     def show_hit(self,path,count=1):
         scope = self.args.target or '全部人脸'
