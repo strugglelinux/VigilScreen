@@ -6,8 +6,9 @@ from PIL import Image
 
 
 class LatestCamera:
-    def __init__(self, index):
+    def __init__(self, index, width=1920, height=1080):
         self.index = index
+        self.width, self.height = width, height
         self.condition = threading.Condition()
         self.stopped = threading.Event()
         self.latest = None
@@ -44,6 +45,9 @@ class LatestCamera:
             capture = cv2.VideoCapture(self.index)
             if not capture.isOpened():
                 raise RuntimeError('无法打开摄像头，请检查设备编号、占用情况和系统摄像头权限。')
+            # 不支持时使用设备实际返回的分辨率。
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 后端不支持时仍由最近帧机制避免应用层积压。
             while not self.stopped.is_set():
                 ok, frame = capture.read()

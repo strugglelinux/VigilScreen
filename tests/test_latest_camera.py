@@ -30,28 +30,34 @@ class LatestCameraTests(unittest.TestCase):
         capture = Mock()
         capture.isOpened.return_value = True
         capture.read.return_value = (False,None)
-        fake = SimpleNamespace(VideoCapture=Mock(return_value=capture),CAP_PROP_BUFFERSIZE=38)
+        fake = SimpleNamespace(VideoCapture=Mock(return_value=capture),CAP_PROP_BUFFERSIZE=38,CAP_PROP_FRAME_WIDTH=3,CAP_PROP_FRAME_HEIGHT=4)
         camera = LatestCamera(0)
         with patch.dict('sys.modules',{'cv2':fake}):
             camera.start()
             with self.assertRaisesRegex(RuntimeError,'读取失败'):
                 camera.read(timeout=1)
             camera.close()
+        capture.set.assert_any_call(3,1920)
+        capture.set.assert_any_call(4,1080)
         capture.release.assert_called_once()
         self.assertFalse(camera.thread.is_alive())
 
-    def test_frames_are_rgb_and_capture_is_released_by_reader(self):
+    def test_unsupported_resolution_still_delivers_native_rgb_and_releases_device(self):
         capture = Mock()
         capture.isOpened.return_value = True
-        camera = LatestCamera(0)
+        capture.set.return_value = False
+        camera = LatestCamera(0,1280,720)
         def read():
             camera.stopped.set()
             return True,np.array([[[0,0,255]]],dtype=np.uint8)
         capture.read.side_effect = read
-        fake = SimpleNamespace(VideoCapture=Mock(return_value=capture),CAP_PROP_BUFFERSIZE=38,
+        fake = SimpleNamespace(VideoCapture=Mock(return_value=capture),CAP_PROP_BUFFERSIZE=38,CAP_PROP_FRAME_WIDTH=3,CAP_PROP_FRAME_HEIGHT=4,
                                COLOR_BGR2RGB=1,cvtColor=lambda frame,code:frame[:,:,::-1].copy())
         with patch.dict('sys.modules',{'cv2':fake}):
             camera.run()
+        capture.set.assert_any_call(3,1280)
+        capture.set.assert_any_call(4,720)
+        self.assertEqual(camera.latest[0].size,(1,1))
         self.assertEqual(camera.latest[0].getpixel((0,0)),(255,0,0))
         capture.release.assert_called_once()
         self.assertIsNone(camera.read())

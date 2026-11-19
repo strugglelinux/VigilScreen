@@ -186,6 +186,23 @@ class GazeTests(unittest.TestCase):
         network_input = estimator.landmarker.detect.call_args.args[0]
         self.assertEqual(max(network_input.shape[:2]),512)
 
+    def test_small_target_zoom_preserves_original_pixel_gate(self):
+        estimator=self.estimator()
+        estimator.mp=SimpleNamespace(Image=Mock(side_effect=lambda **kwargs:kwargs['data']),
+                                     ImageFormat=SimpleNamespace(SRGB=1))
+        points=[SimpleNamespace(x=x,y=y) for x,y in eye_points()]
+        estimator.landmarker=Mock(detect=Mock(return_value=SimpleNamespace(face_landmarks=[points])))
+        base=np.array([0,0,200,200,40,100,140,100,90,130,60,160,120,160,.99])
+        for size,expected in [(100,True),(30,False)]:
+            with self.subTest(size=size):
+                face=base.copy()
+                face[:14]*=size/200
+                result=estimator.measure(Image.new('RGB',(size,size)),face)
+                self.assertEqual(result.looking,expected)
+                self.assertEqual(max(estimator.landmarker.detect.call_args.args[0].shape[:2]),512)
+                if not expected:
+                    self.assertIn('视线无法确认',result.reason)
+
     def test_centered_both_eyes_pass(self):
         result=evaluate_eyes(eye_points(),(200,200))
         self.assertTrue(result.looking)

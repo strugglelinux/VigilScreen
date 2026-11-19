@@ -1,5 +1,6 @@
 """使用眼角、眼睑和虹膜相对位置估计是否注视镜头；不是精确眼动仪。"""
 from dataclasses import dataclass
+from PIL import Image
 import numpy as np
 import os
 import tempfile
@@ -102,7 +103,7 @@ def evaluate_eyes(points, image_size, reference=None, horizontal=0.12, vertical=
         processed_width=(np.linalg.norm((original[outer]-original[inner])*processing_size)
                          if processing_size is not None else width)
         if width<min_eye_width or processed_width<8:
-            return GazeResult(False,'眼睛过小或处理分辨率不足，请靠近镜头')
+            return GazeResult(False,'距离过远或眼部像素不足，视线无法确认，请靠近镜头')
         axis=(b-a)/width
         normal=np.array([-axis[1],axis[0]])
         upper=np.array([points[u] for u,_ in lids])
@@ -172,9 +173,10 @@ class GazeEstimator:
             return GazeResult(False,'人脸区域无效')
         crop = picture.crop((left,top,right,bottom)).convert('RGB')
         original_size = crop.size
-        # 虹膜网络有固定输入尺寸，大 ROI 先缩小以减少预处理成本。
-        # 几何判断仍用原始尺寸，不能放大小眼睛来绕过清晰度检查。
-        crop.thumbnail((512,512))
+        # 放大目标区域辅助关键点检测；清晰度检查仍使用原始像素。
+        scale = 512 / max(original_size)
+        size = tuple(max(1,round(value*scale)) for value in original_size)
+        crop = crop.resize(size, Image.Resampling.LANCZOS)
         result = self.landmarker.detect(self.mp.Image(image_format=self.mp.ImageFormat.SRGB,data=np.asarray(crop)))
         candidates = []
         for landmarks in result.face_landmarks:

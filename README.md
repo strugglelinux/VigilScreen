@@ -130,3 +130,7 @@ python check_environment.py --models
 ```
 
 测试使用合成数据或临时目录，GUI 联调使用模拟摄像头，不访问真实摄像头。测试方法和模块划分见 [开发文档](docs/DEVELOPMENT.md)，独立应用构建见 [DISTRIBUTION.md](DISTRIBUTION.md)，通用模型来源与许可见 [face_models/README.md](face_models/README.md)。
+
+### 远距离目标视线检测
+
+监控默认请求 1920×1080 原生采集，设备不支持时使用实际返回的分辨率。可用 `--camera-width`、`--camera-height` 调整。目标人脸区域等比缩放至最长边 512 像素再检测关键点；原图单眼宽度仍须达到默认 12 像素。像素不足时显示“距离过远或眼部像素不足，视线无法确认”，不触发命中。此功能是数字放大，不控制光学焦距、不恢复缺失细节。看屏幕仍需在实际位置校准屏幕视线。

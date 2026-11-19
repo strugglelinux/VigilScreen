@@ -706,7 +706,8 @@ class ChiCamera:
             gaze = GazeEstimator(self.args.gaze_model,self.args.gaze_horizontal,self.args.gaze_vertical,self.args.gaze_min_eye_width)
             if self.stop_event.is_set() or self.refresh_request.is_set():
                 return
-            capture = LatestCamera(self.args.camera)
+            capture = LatestCamera(self.args.camera, getattr(self.args,"camera_width",1920),
+                                   getattr(self.args,"camera_height",1080))
             self.active_camera = capture
             capture.start()
             events.put(('ready','正在打开摄像头，请允许系统摄像头权限…'))
@@ -1066,6 +1067,8 @@ def build_parser():
     parser.add_argument('--gaze-min-eye-width', type=positive_float, default=12)
     parser.add_argument('--target',default=None,help='可选身份；默认检测所有人')
     parser.add_argument('--camera', type=nonnegative_int, default=0)
+    parser.add_argument('--camera-width', type=positive_int, default=1920, help='请求采集宽度，实际取决于摄像头')
+    parser.add_argument('--camera-height', type=positive_int, default=1080, help='请求采集高度，实际取决于摄像头')
     parser.add_argument('--confirmations', type=positive_int, default=1,help='连续确认次数，默认单次通过即命中')
     parser.add_argument('--cooldown', type=nonnegative_seconds, default=0.0,help='再次命中冷却秒数，默认 0；持续注视仍只提示一次')
     return parser
